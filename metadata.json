@@ -1,0 +1,5 @@
+{
+  "name": "Remix: NUMA Memory Allocation Simulator",
+  "description": "A simulation of Non-Uniform Memory Access (NUMA) architecture, demonstrating how memory locality affects system performance and latency across different allocation strategies.",
+  "requestFramePermissions": []
+}
