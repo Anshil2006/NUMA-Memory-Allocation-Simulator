@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from "react";
 import {
+  LineChart,
+  Line,
   BarChart,
   Bar,
   XAxis,
@@ -26,7 +28,7 @@ import {
   History,
 } from "lucide-react";
 import { AllocationStrategy, NumaNode, Process, SimulationResult } from "./types";
-import { runSimulation, migrateProcess, defragmentNode, advanceTick } from "./services/simulator";
+import { runSimulation, migrateProcess, defragmentNode, advanceTick, toggleMaintenance } from "./services/simulator";
 import { cn } from "./lib/utils";
 import { GoogleGenAI } from "@google/genai";
 
@@ -48,6 +50,9 @@ export default function App() {
   const [filterType, setFilterType] = useState<string>("All");
   const [isPlaying, setIsPlaying] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<keyof Process>("id");
+  const [drillDownNode, setDrillDownNode] = useState<number | null>(null);
 
   // Load settings
   React.useEffect(() => {
@@ -90,6 +95,28 @@ export default function App() {
     if (strategy === AllocationStrategy.AI_OPTIMIZED) {
       getAiAdvice(newResult);
     }
+  };
+
+  const handleScenario = (type: "Database" | "Compute" | "Balanced") => {
+    let nc = 4, mpn = 1024, pc = 20, s = AllocationStrategy.LOCALITY_AWARE;
+    if (type === "Database") {
+      nc = 8; mpn = 4096; pc = 50; s = AllocationStrategy.INTERLEAVE;
+    } else if (type === "Compute") {
+      nc = 4; mpn = 512; pc = 100; s = AllocationStrategy.AFFINITY_STRICT;
+    }
+    setNodeCount(nc);
+    setMemoryPerNode(mpn);
+    setProcessCount(pc);
+    setStrategy(s);
+    
+    const newResult = runSimulation(nc, mpn, pc, s);
+    setResult(newResult);
+    setHistory((prev) => [newResult, ...prev].slice(0, 5));
+  };
+
+  const handleToggleMaintenance = (nodeId: number) => {
+    if (!result) return;
+    setResult(toggleMaintenance({ ...result }, nodeId));
   };
 
   const handleExportCSV = () => {
@@ -282,6 +309,70 @@ export default function App() {
         </div>
       )}
 
+      {/* Node Drill-down Modal */}
+      {drillDownNode !== null && result && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
+          <div className={cn(
+            "max-w-4xl w-full p-8 rounded-3xl border shadow-2xl",
+            isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+          )}>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold">Node {drillDownNode} Breakdown</h2>
+              <button 
+                onClick={() => setDrillDownNode(null)}
+                className="p-2 rounded-full hover:bg-slate-100 transition-colors"
+              >
+                <RefreshCw className="w-5 h-5 rotate-45" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100">
+                <p className="text-xs font-bold text-blue-600 uppercase mb-1">Active Processes</p>
+                <p className="text-2xl font-black text-blue-900">
+                  {result.processes.filter(p => p.memoryNodeId === drillDownNode && p.status === "running").length}
+                </p>
+              </div>
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100">
+                <p className="text-xs font-bold text-emerald-600 uppercase mb-1">Health Score</p>
+                <p className="text-2xl font-black text-emerald-900">
+                  {Math.round(result.nodes[drillDownNode].healthScore)}%
+                </p>
+              </div>
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-100">
+                <p className="text-xs font-bold text-amber-600 uppercase mb-1">Fragmentation</p>
+                <p className="text-2xl font-black text-amber-900">
+                  {Math.round(result.nodes[drillDownNode].fragmentation * 100)}%
+                </p>
+              </div>
+            </div>
+            <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="pb-2 font-bold text-slate-400 uppercase text-[10px]">Process ID</th>
+                    <th className="pb-2 font-bold text-slate-400 uppercase text-[10px]">Type</th>
+                    <th className="pb-2 font-bold text-slate-400 uppercase text-[10px]">Memory</th>
+                    <th className="pb-2 font-bold text-slate-400 uppercase text-[10px]">Latency</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.processes
+                    .filter(p => p.memoryNodeId === drillDownNode && p.status === "running")
+                    .map(p => (
+                    <tr key={p.id} className="border-b border-slate-50">
+                      <td className="py-2 font-mono text-xs">#{p.id}</td>
+                      <td className="py-2 text-xs">{p.type}</td>
+                      <td className="py-2 text-xs">{p.memoryRequired}MB</td>
+                      <td className="py-2 text-xs font-bold text-blue-600">{p.latency}ms</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Sidebar Configuration */}
         <div className="lg:col-span-3 space-y-6">
@@ -375,6 +466,39 @@ export default function App() {
                   ))}
                 </div>
               </div>
+            </div>
+          </section>
+
+          {/* Scenarios Section */}
+          <section className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-2 mb-4 text-slate-800">
+              <LayoutGrid className="w-4 h-4" />
+              <h2 className="font-bold text-sm uppercase tracking-wider">
+                Workload Scenarios
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <button 
+                onClick={() => handleScenario("Database")}
+                className="flex items-center justify-between px-4 py-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-xs font-bold transition-all"
+              >
+                <span>🗄️ Database Server</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
+              <button 
+                onClick={() => handleScenario("Compute")}
+                className="flex items-center justify-between px-4 py-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-xs font-bold transition-all"
+              >
+                <span>⚡ High Compute</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
+              <button 
+                onClick={() => handleScenario("Balanced")}
+                className="flex items-center justify-between px-4 py-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-xs font-bold transition-all"
+              >
+                <span>⚖️ Balanced Load</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
             </div>
           </section>
 
@@ -523,6 +647,37 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {/* Performance History Chart */}
+              <div className={cn(
+                "p-6 rounded-3xl border shadow-sm mb-6",
+                isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+              )}>
+                <div className="flex items-center gap-2 mb-6">
+                  <Activity className="w-5 h-5 text-emerald-600" />
+                  <h3 className="font-bold">Real-time Performance Metrics</h3>
+                </div>
+                <div className="h-[200px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={result.performanceHistory}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} />
+                      <XAxis dataKey="tick" stroke="#94a3b8" fontSize={10} />
+                      <YAxis yAxisId="left" stroke="#3b82f6" fontSize={10} />
+                      <YAxis yAxisId="right" orientation="right" stroke="#10b981" fontSize={10} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: isDarkMode ? "#0f172a" : "#fff",
+                          borderColor: isDarkMode ? "#1e293b" : "#e2e8f0",
+                          color: isDarkMode ? "#f1f5f9" : "#0f172a"
+                        }} 
+                      />
+                      <Legend verticalAlign="top" height={36} iconType="circle" />
+                      <Line yAxisId="left" type="monotone" dataKey="avgLatency" stroke="#3b82f6" strokeWidth={2} dot={false} name="Avg Latency (ms)" />
+                      <Line yAxisId="right" type="monotone" dataKey="totalBandwidth" stroke="#10b981" strokeWidth={2} dot={false} name="Total BW (MB/s)" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
 
               {/* Advanced Visualizations Row */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
@@ -841,12 +996,29 @@ export default function App() {
                           />
                         </div>
 
-                        <button 
-                          onClick={() => handleDefrag(node.id)}
-                          className="mt-2 text-[8px] font-bold text-blue-500 hover:underline"
-                        >
-                          Defrag
-                        </button>
+                        <div className="flex gap-1 mt-2">
+                          <button 
+                            onClick={() => handleDefrag(node.id)}
+                            className="text-[8px] font-bold text-blue-500 hover:underline"
+                          >
+                            Defrag
+                          </button>
+                          <button 
+                            onClick={() => handleToggleMaintenance(node.id)}
+                            className={cn(
+                              "text-[8px] font-bold hover:underline",
+                              node.isMaintenanceMode ? "text-emerald-500" : "text-rose-500"
+                            )}
+                          >
+                            {node.isMaintenanceMode ? "Enable" : "Drain"}
+                          </button>
+                          <button 
+                            onClick={() => setDrillDownNode(node.id)}
+                            className="text-[8px] font-bold text-slate-400 hover:underline"
+                          >
+                            Details
+                          </button>
+                        </div>
                         
                         {/* Tooltip on hover */}
                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-40 p-3 bg-slate-900 text-white text-[10px] rounded-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 shadow-2xl">
@@ -905,12 +1077,22 @@ export default function App() {
                   "lg:col-span-8 p-6 rounded-3xl border shadow-sm overflow-hidden",
                   isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
                 )}>
-                  <div className="flex items-center justify-between mb-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                     <div className="flex items-center gap-2">
                       <Cpu className="w-5 h-5 text-blue-600" />
                       <h3 className="font-bold">Process Details</h3>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      <input 
+                        type="text" 
+                        placeholder="Search ID..." 
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className={cn(
+                          "text-[10px] px-3 py-1.5 rounded-lg border outline-none w-32",
+                          isDarkMode ? "bg-slate-800 border-slate-700 text-slate-300" : "bg-slate-50 border-slate-200"
+                        )}
+                      />
                       {["All", "CPU-bound", "Memory-bound", "Balanced"].map(type => (
                         <button
                           key={type}
@@ -931,17 +1113,31 @@ export default function App() {
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className={cn("border-b", isDarkMode ? "border-slate-800" : "border-slate-100")}>
-                          <th className="pb-3 font-bold text-slate-400 uppercase text-[10px] tracking-widest">ID</th>
+                          <th 
+                            className="pb-3 font-bold text-slate-400 uppercase text-[10px] tracking-widest cursor-pointer hover:text-blue-500"
+                            onClick={() => setSortField("id")}
+                          >
+                            ID
+                          </th>
                           <th className="pb-3 font-bold text-slate-400 uppercase text-[10px] tracking-widest">Type</th>
                           <th className="pb-3 font-bold text-slate-400 uppercase text-[10px] tracking-widest">CPU Node</th>
                           <th className="pb-3 font-bold text-slate-400 uppercase text-[10px] tracking-widest">Memory Node</th>
-                          <th className="pb-3 font-bold text-slate-400 uppercase text-[10px] tracking-widest">Latency</th>
+                          <th 
+                            className="pb-3 font-bold text-slate-400 uppercase text-[10px] tracking-widest cursor-pointer hover:text-blue-500"
+                            onClick={() => setSortField("latency")}
+                          >
+                            Latency
+                          </th>
                           <th className="pb-3 font-bold text-slate-400 uppercase text-[10px] tracking-widest">Status</th>
                         </tr>
                       </thead>
                       <tbody>
                         {result.processes
-                          .filter(p => filterType === "All" || p.type === filterType)
+                          .filter(p => (filterType === "All" || p.type === filterType) && p.id.toString().includes(searchQuery))
+                          .sort((a, b) => {
+                            if (sortField === "latency") return b.latency - a.latency;
+                            return a.id - b.id;
+                          })
                           .slice(0, 15)
                           .map((p) => (
                           <tr key={p.id} className={cn("border-b", isDarkMode ? "border-slate-800/50" : "border-slate-50")}>

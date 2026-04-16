@@ -76,22 +76,23 @@ export function runSimulation(
 
     switch (strategy) {
       case AllocationStrategy.AFFINITY_STRICT:
-        if (nodes[assignedNodeId].usedMemory + memoryRequired <= nodes[assignedNodeId].totalMemory) {
+        if (!nodes[assignedNodeId].isMaintenanceMode && nodes[assignedNodeId].usedMemory + memoryRequired <= nodes[assignedNodeId].totalMemory) {
           memoryNodeId = assignedNodeId;
         } else {
-          // Fallback if strict fails (or we could fail allocation)
           memoryNodeId = -1;
         }
         break;
 
       case AllocationStrategy.AI_OPTIMIZED:
       case AllocationStrategy.LOCALITY_AWARE:
-        if (nodes[assignedNodeId].usedMemory + memoryRequired <= nodes[assignedNodeId].totalMemory) {
+        if (!nodes[assignedNodeId].isMaintenanceMode && nodes[assignedNodeId].usedMemory + memoryRequired <= nodes[assignedNodeId].totalMemory) {
           memoryNodeId = assignedNodeId;
         } else {
-          const sortedNodes = [...nodes].sort((a, b) => 
-            distanceMatrix[assignedNodeId][a.id] - distanceMatrix[assignedNodeId][b.id]
-          );
+          const sortedNodes = [...nodes]
+            .filter(n => !n.isMaintenanceMode)
+            .sort((a, b) => 
+              distanceMatrix[assignedNodeId][a.id] - distanceMatrix[assignedNodeId][b.id]
+            );
           for (const node of sortedNodes) {
             if (node.usedMemory + memoryRequired <= node.totalMemory) {
               memoryNodeId = node.id;
@@ -203,7 +204,23 @@ export function runSimulation(
     events,
     isPaused: false,
     currentTick: 0,
+    performanceHistory: [],
   };
+}
+
+export function toggleMaintenance(result: SimulationResult, nodeId: number): SimulationResult {
+  const nodes = [...result.nodes];
+  nodes[nodeId] = { ...nodes[nodeId], isMaintenanceMode: !nodes[nodeId].isMaintenanceMode };
+  
+  result.events.push({
+    timestamp: Date.now(),
+    type: "migration",
+    message: `Node ${nodeId} ${nodes[nodeId].isMaintenanceMode ? "entered" : "exited"} maintenance mode`,
+    nodeId,
+    severity: "warning"
+  });
+
+  return { ...result, nodes };
 }
 
 export function advanceTick(result: SimulationResult): SimulationResult {
@@ -212,9 +229,15 @@ export function advanceTick(result: SimulationResult): SimulationResult {
   const newNodes = [...newResult.nodes];
   const newEvents = [...newResult.events];
 
+  let totalBandwidth = 0;
+  let totalLatency = 0;
+  let activeCount = 0;
+
   newProcesses.forEach(p => {
     if (p.status === "running") {
       p.duration -= 1;
+      totalLatency += p.latency;
+      activeCount++;
       if (p.duration <= 0) {
         p.status = "finished";
         // Release memory
@@ -251,13 +274,22 @@ export function advanceTick(result: SimulationResult): SimulationResult {
         severity: "warning"
       });
     }
+    totalBandwidth += node.currentBandwidth;
   });
+
+  const avgLatency = activeCount > 0 ? totalLatency / activeCount : 0;
+  const newHistory = [...(result.performanceHistory || []), { 
+    tick: newResult.currentTick, 
+    avgLatency, 
+    totalBandwidth 
+  }].slice(-20);
 
   return {
     ...newResult,
     processes: newProcesses,
     nodes: newNodes,
-    events: newEvents.slice(-50) // Keep last 50 events
+    events: newEvents.slice(-50), // Keep last 50 events
+    performanceHistory: newHistory
   };
 }
 

@@ -3,7 +3,7 @@
 All major feature enhancements and architectural updates implemented in this project.
 
 ## [v2.0.0] - 2026-04-15
-### Added (16 Major Feature Commits)
+### Added (21 Major Feature Commits)
 1. **Strict Affinity Strategy**: New allocation logic that forces memory to stay on the local node, ensuring zero interconnect latency.
 2. **Playback Controls**: Interactive Play, Pause, and Step-Forward buttons to control the simulation timeline.
 3. **Tick-based Simulation Engine**: Processes now have dynamic lifecycles, completing and releasing resources over time.
@@ -20,6 +20,11 @@ All major feature enhancements and architectural updates implemented in this pro
 14. **Enhanced Strategy Descriptions**: Detailed technical documentation for all 7 allocation strategies in the UI.
 15. **System Info Dashboard**: Hardware-level details including socket IDs and interconnect speeds.
 16. **Refined UI Layout**: Optimized "Pro" dashboard with improved dark mode contrast and a "Reset to Defaults" feature.
+17. **Workload Presets (Scenarios)**: One-click setup for "Database", "Compute", and "Balanced" server workloads.
+18. **Real-time Performance Charting**: Line charts visualizing Average Latency and Total Bandwidth over time (ticks).
+19. **Node Maintenance (Drain) Mode**: Ability to disable nodes for new allocations and simulate hardware maintenance.
+20. **Process Search & Advanced Sorting**: Search bar and multi-column sorting for managing large-scale simulations.
+21. **Node Drill-down Breakdown**: Detailed modal view showing the exact process list and metrics for a specific node.
 
 ### Technical Improvements
 - Integrated **Google Gemini AI** for real-time optimization advice.

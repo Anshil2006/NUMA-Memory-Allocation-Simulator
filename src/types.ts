@@ -19,6 +19,7 @@ export interface NumaNode {
   currentBandwidth: number;
   socketId: number;
   healthScore: number; // 0 to 100
+  isMaintenanceMode?: boolean;
 }
 
 export interface Process {
@@ -59,4 +60,5 @@ export interface SimulationResult {
   aiAdvice?: string;
   isPaused: boolean;
   currentTick: number;
+  performanceHistory: { tick: number; avgLatency: number; totalBandwidth: number }[];
 }
